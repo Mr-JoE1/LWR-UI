@@ -607,7 +607,7 @@ class ConPanel(wx.Panel):
                         self.txtTerm.AppendText(chr(byte))
 
         # self.ResetData()
-        print('\n----------------------------\n')
+
 
  # ===========================================================================
  # Handling bottom panel  Buttons
