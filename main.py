@@ -103,7 +103,7 @@ class RadarGraph(wx.Panel):
         dc.DrawBitmap(wx.Bitmap("car.png"),int(cx-38*scale) , int(cy-38*scale),True) 
         
         
-        dc.SetPen(wx.Pen('red', 3))
+        dc.SetPen(wx.Pen('black', 3))
         xx, yy = self.ThreadAngle(115*scale, ang or 0, cx, cy)
         dc.DrawLine(cx, cy, int(xx), int(yy))
         

@@ -8,6 +8,7 @@
 ################################################################################
 
 import os
+import winsound 
 import time
 import wx
 import wx.adv
@@ -17,11 +18,16 @@ import wx.lib.newevent
 import _thread
 import numpy as np
 from SerialCom import *
+from _codecs import utf_8_decode
+from sys import getsizeof
+from win32ui import GetType
+from builtins import len
 
 
 # new event class for the COM thread
 (UpdateComData, EVT_UPDATE_COMDATA) = wx.lib.newevent.NewEvent()
 (UpdateAngle, EVT_UPDATE_ANGLE) = wx.lib.newevent.NewEvent()
+(UpdateMsg, EVT_UPDATE_COMMSG) = wx.lib.newevent.NewEvent()
 
 # default data file name
 data_file = 'log.txt'
@@ -86,11 +92,25 @@ class ComThread:
         # keep running as far as the flag is set
         while self.keepGoing:
             # read a byte until timeout
-            data = self.ser.read(100)
+            data = self.ser.read(1)
+
 #             data = bytearray(data.strip(), 'utf-8')
 
             # valid byte received
-            if len(data):
+            if data == b'\xa4':
+                ms= self.ser.read(11)
+                msg = UpdateMsg(data=ms)
+                wx.PostEvent(self.win, msg)
+                evt = UpdateComData(data=ms)
+                # post the event
+                wx.PostEvent(self.win, evt)
+                
+                #play alert sound for threads using Beepy Lib    
+                duration = 1000  # milliseconds
+                freq = 740  # Hz
+                winsound.Beep(freq, duration)
+                
+            else:
                 # create an event with the byte
                 evt = UpdateComData(data=data)
                 # post the event
@@ -218,7 +238,7 @@ class ConPanel(wx.Panel):
         # terminal mode selection
         self.cboTMode = wx.Choice(self, -1,
                                   choices=['ASCII', 'Hex', 'Protocol'], size=(70, 20), style=wx.TE_CENTRE)
-        self.cboTMode.SetStringSelection('ASCII')
+        self.cboTMode.SetStringSelection('Hex')
         hbox5.Add(self.cboTMode, flag=wx.LEFT, border=2)
 
         # newline character
@@ -274,6 +294,7 @@ class ConPanel(wx.Panel):
         self.txtTerm.Bind(wx.EVT_CHAR, self.OnTermChar)
         self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
         self.Bind(EVT_UPDATE_COMDATA, self.OnUpdateComData)
+        self.Bind(EVT_UPDATE_COMMSG, self.OnUpdateComMsg)
 
         # Control  buttons Events objects
         btn1.Bind(wx.EVT_BUTTON, self.OnFileSave)
@@ -474,93 +495,88 @@ class ConPanel(wx.Panel):
             self.ser.write(OutPackets[self.choSndPkt.GetStringSelection()])
 
     # COM data input handler
+    def OnUpdateComMsg(self, msg):
+        self.rawdata2 = msg.data if isinstance(
+            msg.data, bytearray) else bytearray(msg.data)
+        dd= self.rawdata2.hex(':')
+        #print(dd)
+        #print(self.rawdata2)
+        
+        #decode thread angel and creat event
+        if dd[7] == '4' and dd[9] == '0' and dd[10] == '1':
+                self.ang = '22'
+        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '2':
+                self.ang = '45'
+        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '3':
+                self.ang = '67'
+        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '4':
+                self.ang = '90'
+        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '5':
+                self.ang = '112'
+        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '6':
+                self.ang = '135'
+        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '7':
+                self.ang = '157'
+        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '8':
+                self.ang = '180'
+        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '9':
+                self.ang = '202'
+        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '0':
+                self.ang = '225'
+        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '1':
+                self.ang = '247'
+        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '2':
+                self.ang = '270'
+        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '3':
+                self.ang = '292'
+        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '4':
+                self.ang = '315'
+        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '5':
+            self.ang = '337'
+        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '6':
+            self.ang = '360'
+        else:
+            self.ang = "XX"
+        wx.PostEvent(self.parent, UpdateAngle(data=self.ang))
+        #print(self.ang)
+        
+        # text display angel
+        self.data2.Clear()
+        self.data2.AppendText(self.ang)
+        
+                    
+        #decode freq and laser thread type 
+        s= dd[25]+dd[24]+dd[22]+dd[21]+dd[19]+dd[18]+dd[16]+dd[15]
+        counts = int(s, 16)
+        counts_time= counts*(20/(10**9))
+        hz= 1/ counts_time
+        
+        if hz >= 1  and hz <=7 :
+            self.type = 'LRF'
+        elif hz > 7  and hz <=25 :
+            self.type = 'LTD'
+        elif hz >= 1000  :
+            self.type = 'BR' 
+        else:
+            self.type = 'None' 
+          
+        self.freq= str(hz)
+        self.data3.Clear()
+        self.data3.AppendText(self.freq)
+        self.data4.Clear()
+        self.data4.AppendText(self.type)
+        
+        self.rawdata2 = bytearray()            
+        dd = ''
+    
 
     def OnUpdateComData(self, evt):
 
-        # for byte in evt.data:
-        #     # append incoming byte to the rawdata
-        #     self.rawdata.append(byte)
-        #     self.rawdata2 = self.rawdata.replace(b'\r', b'')
-        #     self.rawdata2 = self.rawdata.replace(b'\n', b'')
-        #     dd= self.rawdata2.decode('utf-8') 145.96153401553845 225 185
-        
-        
-        #Decode thread angle algorithm
-        self.rawdata = evt.data if isinstance(
-            evt.data, bytearray) else bytearray(evt.data)
-        self.rawdata2 = self.rawdata.strip()
-        
-        dd = self.rawdata2.decode('utf-8')
+        for byte in evt.data :
+            self.rawdata.append(byte)
 
-        if len(dd) == 26:
-            if dd[9] == '4' and dd[10] == '0' and dd[11] == '1':
-                self.ang = '22'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '2':
-                self.ang = '45'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '3':
-                self.ang = '67'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '4':
-                self.ang = '90'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '5':
-                self.ang = '112'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '6':
-                self.ang = '135'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '7':
-                self.ang = '157'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '8':
-                self.ang = '180'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '9':
-                self.ang = '202'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'A':
-                self.ang = '225'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'B':
-                self.ang = '247'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'C':
-                self.ang = '270'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'D':
-                self.ang = '292'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'E':
-                self.ang = '315'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'F':
-                self.ang = '337'
-            elif dd[9] == '4' and dd[10] == '1' and dd[11] == '0':
-                self.ang = '360'
-            else:
-                self.ang = "XX"
 
-            wx.PostEvent(self.parent, UpdateAngle(data=self.ang))
-
-            #print(self.rawdata2)
-            self.data2.Clear()
-            self.data2.AppendText(self.ang)
-            #print('angle ' + self.ang)
-
-            
-            #decode freq and laser thread type 
-            s= dd[21]+dd[20]+dd[19]+dd[18]+dd[17]+dd[16]+dd[15]+dd[14]
-            counts = int(s, 16)
-            counts_time= counts*(20/(10**9))
-            hz= 1/ counts_time
-            
-            if hz >= 1  and hz <=7 :
-                self.type = 'LRF'
-            elif hz > 7  and hz <=25 :
-                self.type = 'LTD'
-            elif hz >= 1000  :
-                self.type = 'BR' 
-            else:
-                self.type = 'None' 
-              
-            self.freq= str(hz)
-            self.data3.Clear()
-            self.data3.AppendText(self.freq)
-            self.data4.Clear()
-            self.data4.AppendText(self.type)
-            
-            self.rawdata = bytearray()
-            self.rawdata2 = bytearray()            
-            dd = ''
-#             return self.ang
+            #return self.ang
             # time.sleep(1)
             # self.ResetData()
 
