@@ -21,7 +21,8 @@ from SerialCom import *
 from _codecs import utf_8_decode
 from sys import getsizeof
 from win32ui import GetType
-from builtins import len
+from builtins import len, ord
+from matplotlib import streamplot
 
 
 # new event class for the COM thread
@@ -30,7 +31,7 @@ from builtins import len
 (UpdateMsg, EVT_UPDATE_COMMSG) = wx.lib.newevent.NewEvent()
 
 # default data file name
-data_file = 'log.txt'
+data_file = 'LWR_log.txt'
 
 global fname
 
@@ -100,15 +101,14 @@ class ComThread:
             if data == b'\xa4':
                 ms= self.ser.read(11)
                 msg = UpdateMsg(data=ms)
+                # post the event for decode fun
                 wx.PostEvent(self.win, msg)
                 evt = UpdateComData(data=ms)
-                # post the event
+                # post the event for terminal 
                 wx.PostEvent(self.win, evt)
-                
+    
                 #play alert sound for threads using Beepy Lib    
-                duration = 1000  # milliseconds
-                freq = 740  # Hz
-                winsound.Beep(freq, duration)
+                winsound.Beep(750, 50)
                 
             else:
                 # create an event with the byte
@@ -136,7 +136,7 @@ class ConPanel(wx.Panel):
     def __init__(self, parent, ser, **kwgs):
         wx.Panel.__init__(self, parent, **kwgs)
         self.parent = parent
-        self.SetBackgroundColour('WHITE')
+        self.SetBackgroundColour('black')
         fname = GetMonoFont()
         # serial port
         self.ser = ser
@@ -150,7 +150,7 @@ class ConPanel(wx.Panel):
         # Terminal Layout
         hbox2 = wx.BoxSizer(wx.HORIZONTAL)
         self.txtTerm = wx.TextCtrl(
-            self, -1, "", size=(450, 120), style=wx.TE_MULTILINE | wx.TE_READONLY)
+            self, -1, "", size=(460, 120), style=wx.TE_MULTILINE | wx.TE_READONLY)
         self.txtTerm.SetForegroundColour('yellow')
         self.txtTerm.SetBackgroundColour('black')
         self.txtTerm.SetFont(wx.Font(11, 75, 90, 90, faceName=fname))
@@ -161,19 +161,21 @@ class ConPanel(wx.Panel):
 
         hbox3 = wx.BoxSizer(wx.HORIZONTAL)
 
-        txt1 = wx.StaticText(self, label='Head')
+        txt1 = wx.StaticText(self, label='Angle')
+        txt1.SetForegroundColour('yellow')
         txt1.SetFont(wx.Font(12, 75, 90, 90, faceName=fname))
         hbox3.Add(txt1, flag=wx.LEFT, border=8)
 
-        data1 = wx.TextCtrl(self, wx.ID_ANY, "0x01",
-                            size=(50, 25), style=wx.TE_CENTRE)
-        data1.SetFont(wx.Font(13, 75, 90, 90, faceName=fname))
-        data1.SetForegroundColour('red')
-        data1.SetBackgroundColour('black')
-        data1.SetMaxLength(4)
-        hbox3.Add(data1, flag=wx.LEFT, border=2)
+        self.data1 = wx.TextCtrl(
+            self, wx.ID_ANY, "", size=(50, 25), style=wx.TE_CENTRE)
+        self.data1.SetFont(wx.Font(13, 75, 90, 90, faceName=fname))
+        self.data1.SetForegroundColour('red')
+        self.data1.SetBackgroundColour('black')
+        self.data1.SetMaxLength(4)
+        hbox3.Add(self.data1, flag=wx.LEFT, border=2)
 
-        txt2 = wx.StaticText(self, label="Angle")
+        txt2 = wx.StaticText(self, label="T(ms)")
+        txt2.SetForegroundColour('yellow')
         txt2.SetFont(wx.Font(13, 75, 90, 90, faceName=fname))
         hbox3.Add(txt2, flag=wx.LEFT, border=8)
         
@@ -189,6 +191,7 @@ class ConPanel(wx.Panel):
         hbox3.Add(self.data2, flag=wx.LEFT, border=2)
 
         txt3 = wx.StaticText(self, label='F(HZ)')
+        txt3.SetForegroundColour('yellow')
         txt3.SetFont(wx.Font(13, 75, 90, 90, faceName=fname))
         hbox3.Add(txt3, flag=wx.LEFT, border=8)
 
@@ -201,6 +204,7 @@ class ConPanel(wx.Panel):
         hbox3.Add(self.data3, flag=wx.LEFT, border=2)
 
         txt4 = wx.StaticText(self, label='Type')
+        txt4.SetForegroundColour('yellow')
         txt4.SetFont(wx.Font(11, 75, 90, 90, faceName=fname))
         hbox3.Add(txt4, flag=wx.LEFT, border=8)
 
@@ -350,8 +354,15 @@ class ConPanel(wx.Panel):
 
     # Reset raw data. Terminal will be cleared as well.
     def ResetData(self):
-        self.rawdata.clear()
+        #self.rawdata.append(ord('RST'))
         self.ClearTerminal()
+        self.ang=0
+        wx.PostEvent(self.parent, UpdateAngle(data=self.ang))
+        self.data1.Clear()
+        self.data2.Clear()
+        self.data3.Clear()
+        self.data4.Clear() 
+        
 
     # Open COM port
     def OpenPort(self, port, speed):
@@ -389,8 +400,9 @@ class ConPanel(wx.Panel):
 
     # Save received data
     def SaveRawData(self, data_file):
+        dout= self.rawdata.hex(':')
         f = open(data_file, 'wb')
-        pickle.dump(str(self.rawdata), f)
+        pickle.dump(dout, f)
         f.close()
 
     # Send data via COM port
@@ -503,72 +515,80 @@ class ConPanel(wx.Panel):
         #print(self.rawdata2)
         
         #decode thread angel and creat event
-        if dd[7] == '4' and dd[9] == '0' and dd[10] == '1':
-                self.ang = '22'
-        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '2':
-                self.ang = '45'
-        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '3':
-                self.ang = '67'
-        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '4':
-                self.ang = '90'
-        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '5':
-                self.ang = '112'
-        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '6':
-                self.ang = '135'
-        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '7':
-                self.ang = '157'
-        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '8':
-                self.ang = '180'
-        elif dd[7] == '4' and dd[9] == '0' and dd[10] == '9':
-                self.ang = '202'
-        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '0':
-                self.ang = '225'
-        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '1':
-                self.ang = '247'
-        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '2':
-                self.ang = '270'
-        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '3':
-                self.ang = '292'
-        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '4':
-                self.ang = '315'
-        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '5':
-            self.ang = '337'
-        elif dd[7] == '4' and dd[9] == '1' and dd[10] == '6':
-            self.ang = '360'
-        else:
-            self.ang = "XX"
-        wx.PostEvent(self.parent, UpdateAngle(data=self.ang))
-        #print(self.ang)
+        if dd[6] == '6' and dd[7]=='4':
+            
+            if dd[7] == '4' and dd[9] == '0' and dd[10] == '1':
+                    self.ang = '22'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '2':
+                    self.ang = '45'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '3':
+                    self.ang = '67'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '4':
+                    self.ang = '90'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '5':
+                    self.ang = '112'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '6':
+                    self.ang = '135'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '7':
+                    self.ang = '157'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '8':
+                    self.ang = '180'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '9':
+                    self.ang = '202'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '0':
+                    self.ang = '225'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '1':
+                    self.ang = '247'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '2':
+                    self.ang = '270'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '3':
+                    self.ang = '292'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '4':
+                    self.ang = '315'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '5':
+                self.ang = '337'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '6':
+                self.ang = '360'
+            else:
+                self.ang = "XX"
+            wx.PostEvent(self.parent, UpdateAngle(data=self.ang))
+            #print(self.ang)
+            
+            # text display angel
+            self.data1.Clear()
+            self.data1.AppendText(self.ang)
+            
+                        
+            #decode freq and laser thread type 
+            s= dd[24]+dd[25]+dd[21]+dd[22]+dd[18]+dd[19]+dd[15]+dd[16]
+            counts = int(s, 16)
+            counts_time= counts*(20/(10**9))
+            # dispaly count time
+            hz= 1/counts_time
+            tms= counts*(20/(10**6))
+            
+            if hz >= 1  and hz <=7 :
+                self.type = 'LRF'
+            elif hz > 7  and hz <=25 :
+                self.type = 'LTD'
+            elif hz >= 1000  :
+                self.type = 'BR' 
+            else:
+                self.type = 'None' 
+              
+            self.freq= str(hz)
+            self.tt= str(tms)
+            self.data2.Clear()
+            self.data2.AppendText(self.tt)
+            self.data3.Clear()
+            self.data3.AppendText(self.freq)
+            self.data4.Clear()
+            self.data4.AppendText(self.type)
+            
+
+            self.rawdata2 = bytearray()            
+            dd = ''
         
-        # text display angel
-        self.data2.Clear()
-        self.data2.AppendText(self.ang)
-        
-                    
-        #decode freq and laser thread type 
-        s= dd[25]+dd[24]+dd[22]+dd[21]+dd[19]+dd[18]+dd[16]+dd[15]
-        counts = int(s, 16)
-        counts_time= counts*(20/(10**9))
-        hz= 1/ counts_time
-        
-        if hz >= 1  and hz <=7 :
-            self.type = 'LRF'
-        elif hz > 7  and hz <=25 :
-            self.type = 'LTD'
-        elif hz >= 1000  :
-            self.type = 'BR' 
-        else:
-            self.type = 'None' 
-          
-        self.freq= str(hz)
-        self.data3.Clear()
-        self.data3.AppendText(self.freq)
-        self.data4.Clear()
-        self.data4.AppendText(self.type)
-        
-        self.rawdata2 = bytearray()            
-        dd = ''
-    
 
     def OnUpdateComData(self, evt):
 

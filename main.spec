@@ -4,7 +4,11 @@ block_cipher = None
 
 
 a = Analysis(['main.py'],
+<<<<<<< HEAD
              pathex=['C:\\Users\\hunte\\Desktop\\wx_app\\wxterm-master-2'],
+=======
+             pathex=['G:\\R and D\\TRC- LWR\\wx_app\\LWR-UI'],
+>>>>>>> 89343d1 ( Relase 1.6)
              binaries=[],
              datas=[],
              hiddenimports=[],
