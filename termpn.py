@@ -8,6 +8,7 @@
 ################################################################################
 
 import os
+#import winsound
 import time
 import wx
 import wx.adv
@@ -16,38 +17,110 @@ import serial
 import wx.lib.newevent
 import _thread
 import numpy as np
+import RPi.GPIO as GPIO
 from SerialCom import *
+from _codecs import utf_8_decode
+from sys import getsizeof
+#from win32ui import GetType
+from builtins import len, ord
+from matplotlib import streamplot
+from binascii import hexlify
+
+# RPI pins def
+# start button--17
+# stop button--27
+# mode button--22
+# left relay--18
+# right relay--23
+# buzzer--24
 
 
+#GPIO.cleanup()
 # new event class for the COM thread
 (UpdateComData, EVT_UPDATE_COMDATA) = wx.lib.newevent.NewEvent()
 (UpdateAngle, EVT_UPDATE_ANGLE) = wx.lib.newevent.NewEvent()
-
+(UpdateMsg, EVT_UPDATE_COMMSG) = wx.lib.newevent.NewEvent()
+(ManStop, RPI_STOP_BUTTON) = wx.lib.newevent.NewEvent()
+(ManStart, RPI_START_BUTTON) = wx.lib.newevent.NewEvent()
+(ManMode, RPI_MODE_BUTTON) = wx.lib.newevent.NewEvent()
 # default data file name
-data_file = 'log.txt'
+data_file = 'LWR_log.txt'
+# RPI PIN schem mode
+GPIO.setmode(GPIO.BCM)
+# RPI PIN DIRECTION
+GPIO.setwarnings(False)
+GPIO.setup(24,GPIO.OUT)
+GPIO.setup(23,GPIO.OUT)
+GPIO.setup(18,GPIO.OUT)
+GPIO.setup(17,GPIO.IN, pull_up_down= GPIO.PUD_DOWN)
+GPIO.setup(27,GPIO.IN, pull_up_down= GPIO.PUD_DOWN)
+GPIO.setup(22,GPIO.IN, pull_up_down= GPIO.PUD_DOWN)
 
 global fname
+
+def GpioControl(self,fn):
+    # RPI PIN schem mode
+    GPIO.setmode(GPIO.BCM)
+    # RPI PIN DIRECTION
+    GPIO.setwarnings(False)
+    GPIO.setup(24,GPIO.OUT)
+    GPIO.setup(23,GPIO.OUT)
+    GPIO.setup(18,GPIO.OUT)
+    GPIO.setup(17,GPIO.IN, pull_up_down= GPIO.PUD_DOWN)
+    GPIO.setup(27,GPIO.IN, pull_up_down= GPIO.PUD_DOWN)
+    GPIO.setup(22,GPIO.IN, pull_up_down= GPIO.PUD_DOWN)
+    # fire alarm
+    if fn==1:
+        #print("alarm")
+        GPIO.output(24, GPIO.HIGH)
+        time.sleep(0.04)
+        GPIO.output(24, GPIO.LOW)
+    # Manual mode select
+    if fn==2:
+        if GPIO.input(22):
+            #print("SMOKE")
+            GPIO.output(23, GPIO.HIGH)
+            GPIO.output(18, GPIO.HIGH)
+        else:
+            GPIO.output(23, GPIO.LOW)
+            GPIO.output(18, GPIO.LOW)
+            #GPIO.cleanup()
+    #Manual Stop
+    elif fn==3:
+        if GPIO.input(27):
+            evt = ManStop()
+            wx.PostEvent(self.win , evt)
+            #print("stop")
+        else:
+            pass
+            #print("no stop")
+    elif fn==5:
+        #GPIO.wait_for_edge(17, GPIO.RISING)
+        evt = ManStart()
+        wx.PostEvent(self,evt)
+
+    #Manual Mode select
+    elif fn==6:
+        if GPIO.input(22):
+            evt = ManMode(data=True)
+            wx.PostEvent(self.win , evt)
+            #print("stop")
+        else:
+            evt = ManMode(data=False)
+            wx.PostEvent(self.win , evt)
+
+
 
 
 def GetMonoFont():
 
-    # do not consider the case of osx
-    if os.name == 'posix':
-        # fc-match will give default monospace font name
-        a = os.popen('fc-match "Monospace"').read()
-        # face name is burried in the middle
-        l = a.find('"')
-        r = a.find('"', l+1)
-        return a[l+1:r]
-
-    # Windows has only a couple of monospace fonts
-    elif os.name == 'nt':
+    if os.name == 'nt':
         fname = 'Consolas'
         return fname
 
     # unknown OS
     else:
-        fname = wx.SystemSettings.GetFont(wx.SYS_SYSTEM_FONT)
+        fname = 'helvetica'#wx.SystemSettings.GetFont(wx.SYS_SYSTEM_FONT)
         return fname
 
  # ===========================================================================
@@ -64,10 +137,9 @@ class ComThread:
         # window to which the receiving data is sent
         self.win = win
         # serial port
-        self.ser = ser
+        self.ser =ser
         # initial state
         self.running = False
-
     # call this method to start the thread.
 
     def Start(self):
@@ -83,14 +155,33 @@ class ComThread:
     # main routine: upon arrival of new data, it generates an event.
     def Run(self):
         # global  self.ang
+
         # keep running as far as the flag is set
         while self.keepGoing:
             # read a byte until timeout
-            data = self.ser.read(100)
+            data = self.ser.read(1)
+            # STOP THREAD USING BUTTON GPIO.27
 #             data = bytearray(data.strip(), 'utf-8')
 
             # valid byte received
-            if len(data):
+            if data == b'\xa4':
+                GpioControl(self,1)
+                ms= self.ser.read(11)
+                msg = UpdateMsg(data=ms)
+                # post the event for decode fun
+                wx.PostEvent(self.win, msg)
+                evt = UpdateComData(data=ms)
+                # post the event for terminal
+                wx.PostEvent(self.win, evt)
+
+                #play alert sound using GPIO.24
+
+                #winsound.Beep(750, 50)
+
+            else:
+                GpioControl(self,3) #Manual Stop
+
+                GpioControl(self,6)
                 # create an event with the byte
                 evt = UpdateComData(data=data)
                 # post the event
@@ -116,7 +207,7 @@ class ConPanel(wx.Panel):
     def __init__(self, parent, ser, **kwgs):
         wx.Panel.__init__(self, parent, **kwgs)
         self.parent = parent
-        self.SetBackgroundColour('WHITE')
+        self.SetBackgroundColour('black')
         fname = GetMonoFont()
         # serial port
         self.ser = ser
@@ -126,160 +217,151 @@ class ConPanel(wx.Panel):
         self.pd.SetMode('decode')
 
         vbox = wx.BoxSizer(wx.VERTICAL)
+        hbox1 = wx.BoxSizer(wx.HORIZONTAL)
+        self.data1 = wx.TextCtrl(
+                self, wx.ID_ANY, "--", size=(80, 55), style=wx.TE_CENTRE)
+        self.data1.SetFont(wx.Font(20, 75, 90, 90, faceName=fname))
+        self.data1.SetForegroundColour('red')
+        self.data1.SetBackgroundColour('white')
+        self.data1.SetMaxLength(5)
+        hbox1.Add(self.data1, flag=wx.LEFT, border=8)
 
-        # Terminal Layout
+        txt1 = wx.StaticText(self, label="الزاوية")
+        txt1.SetForegroundColour('yellow')
+        txt1.SetFont(wx.Font(20,75, 90, 90, faceName=fname))
+        hbox1.Add(txt1, flag=wx.LEFT, border=8)
+
+        vbox.Add(hbox1, flag=wx.EXPAND|wx.LEFT|wx.RIGHT|wx.TOP, border=5)
+
+        vbox.Add((-1, 10))
+
         hbox2 = wx.BoxSizer(wx.HORIZONTAL)
-        self.txtTerm = wx.TextCtrl(
-            self, -1, "", size=(450, 120), style=wx.TE_MULTILINE | wx.TE_READONLY)
-        self.txtTerm.SetForegroundColour('yellow')
-        self.txtTerm.SetBackgroundColour('black')
-        self.txtTerm.SetFont(wx.Font(11, 75, 90, 90, faceName=fname))
-        hbox2.Add(self.txtTerm, proportion=1, border=8)
-        vbox.Add(hbox2, proportion=1, flag=wx.LEFT |
-                 wx.RIGHT | wx.BOTTOM | wx.EXPAND, border=10)
-        vbox.Add((-1, 5))
+        self.data2 = wx.TextCtrl(
+                self, wx.ID_ANY, "--", size=(80, 55), style=wx.TE_CENTRE)
+        self.data2.SetFont(wx.Font(20, 75, 90, 90, faceName=fname))
+        self.data2.SetForegroundColour('red')
+        self.data2.SetBackgroundColour('white')
+        self.data2.SetMaxLength(5)
+        hbox2.Add(self.data2, flag=wx.LEFT, border=8)
+
+        txt2 = wx.StaticText(self, label="التردد")
+        txt2.SetForegroundColour('yellow')
+        txt2.SetFont(wx.Font(20,75, 90, 90, faceName=fname))
+        hbox2.Add(txt2, flag=wx.LEFT, border=8)
+
+        vbox.Add(hbox2, flag=wx.EXPAND|wx.LEFT|wx.RIGHT|wx.TOP, border=5)
+
+        vbox.Add((-1, 10))
 
         hbox3 = wx.BoxSizer(wx.HORIZONTAL)
 
-        txt1 = wx.StaticText(self, label='Head')
-        txt1.SetFont(wx.Font(12, 75, 90, 90, faceName=fname))
-        hbox3.Add(txt1, flag=wx.LEFT, border=8)
+        self.data3 = wx.TextCtrl(self, wx.ID_ANY, "--",
+                            size=(80, 50), style=wx.TE_CENTRE)
+        self.data3.SetFont(wx.Font(20, 75, 90, 90, faceName=fname))
+        self.data3.SetForegroundColour('red')
+        self.data3.SetBackgroundColour('white')
+        self.data3.SetMaxLength(4)
 
-        data1 = wx.TextCtrl(self, wx.ID_ANY, "0x01",
-                            size=(50, 25), style=wx.TE_CENTRE)
-        data1.SetFont(wx.Font(13, 75, 90, 90, faceName=fname))
-        data1.SetForegroundColour('red')
-        data1.SetBackgroundColour('black')
-        data1.SetMaxLength(4)
-        hbox3.Add(data1, flag=wx.LEFT, border=2)
+        hbox3.Add(self.data3, flag=wx.LEFT, border=8)
 
-        txt2 = wx.StaticText(self, label="Angle")
-        txt2.SetFont(wx.Font(13, 75, 90, 90, faceName=fname))
-        hbox3.Add(txt2, flag=wx.LEFT, border=8)
-        
-        
- ################# HERE IS THE ANGLE TEXT OUTPUT #######################
-
-        self.data2 = wx.TextCtrl(
-            self, wx.ID_ANY, "", size=(50, 25), style=wx.TE_CENTRE)
-        self.data2.SetFont(wx.Font(13, 75, 90, 90, faceName=fname))
-        self.data2.SetForegroundColour('red')
-        self.data2.SetBackgroundColour('black')
-        self.data2.SetMaxLength(4)
-        hbox3.Add(self.data2, flag=wx.LEFT, border=2)
-
-        txt3 = wx.StaticText(self, label='F(HZ)')
-        txt3.SetFont(wx.Font(13, 75, 90, 90, faceName=fname))
+        txt3 = wx.StaticText(self, label='النوع')
+        txt3.SetForegroundColour('yellow')
+        txt3.SetFont(wx.Font(20, 75, 90, 90, faceName=fname))
         hbox3.Add(txt3, flag=wx.LEFT, border=8)
 
-        self.data3 = wx.TextCtrl(self, wx.ID_ANY, "",
-                            size=(50, 25), style=wx.TE_CENTRE)
-        self.data3.SetFont(wx.Font(13, 75, 90, 90, faceName=fname))
-        self.data3.SetForegroundColour('red')
-        self.data3.SetBackgroundColour('black')
-        self.data3.SetMaxLength(4)
-        hbox3.Add(self.data3, flag=wx.LEFT, border=2)
+        vbox.Add(hbox3, flag=wx.EXPAND|wx.LEFT|wx.RIGHT|wx.TOP, border=5)
+        
+        
+        hbox555 = wx.BoxSizer(wx.HORIZONTAL)
+        vbox.Add((-1, 10))
 
-        txt4 = wx.StaticText(self, label='Type')
-        txt4.SetFont(wx.Font(11, 75, 90, 90, faceName=fname))
-        hbox3.Add(txt4, flag=wx.LEFT, border=8)
+        self.data5 = wx.TextCtrl(self, wx.ID_ANY, "أرضي",
+                            size=(80, 50), style=wx.TE_CENTRE)
+        self.data5.SetFont(wx.Font(20, 75, 90, 90, faceName=fname))
+        self.data5.SetForegroundColour('red')
+        self.data5.SetBackgroundColour('white')
+        self.data5.SetMaxLength(4)
 
-        self.data4 = wx.TextCtrl(self, wx.ID_ANY, "",
-                            size=(50, 25), style= wx.TE_CENTRE )
-        self.data4.SetFont(wx.Font(13, 75, 90, 90, faceName=fname))
-        self.data4.SetForegroundColour('red')
-        self.data4.SetBackgroundColour('black')
-        self.data4.SetMaxLength(4)
-        hbox3.Add(self.data4, flag=wx.LEFT, border=2)
+        hbox555.Add(self.data5, flag=wx.LEFT, border=8)
 
-        vbox.Add(hbox3, proportion=1, flag=wx.EXPAND |
-                 wx.LEFT | wx.RIGHT | wx.ALL, border=5)
-        vbox.Add((-1, 5))
+        txt5 = wx.StaticText(self, label='التهديد')
+        txt5.SetForegroundColour('yellow')
+        txt5.SetFont(wx.Font(20, 75, 90, 90, faceName=fname))
+        hbox555.Add(txt5, flag=wx.LEFT, border=8)
 
-        # Config Buttons Layout
+        vbox.Add(hbox555, flag=wx.EXPAND|wx.LEFT|wx.RIGHT|wx.TOP, border=5)
 
-        # list of available COM ports
-        from serial.tools import list_ports
-        portlist = [port for port, desc, hwin in list_ports.comports()]
-
-        hbox5 = wx.BoxSizer(wx.HORIZONTAL)
-
-        # baudrate selection
-        self.cboSpeed = wx.Choice(self, -1,
-                                  choices=['9600', '19200', '38400', '57800', '115200', '230400'], size=(70, 20), style=wx.TE_CENTRE)
-        self.cboSpeed.SetStringSelection('115200')
-        hbox5.Add(self.cboSpeed, flag=wx.LEFT, border=2)
-
-        # port selection
-        self.cboCPort = wx.Choice(
-            self, -1, choices=portlist, size=(70, 20), style=wx.TE_CENTRE)
-        hbox5.Add(self.cboCPort, flag=wx.LEFT, border=2)
-
-        # terminal mode selection
-        self.cboTMode = wx.Choice(self, -1,
-                                  choices=['ASCII', 'Hex', 'Protocol'], size=(70, 20), style=wx.TE_CENTRE)
-        self.cboTMode.SetStringSelection('ASCII')
-        hbox5.Add(self.cboTMode, flag=wx.LEFT, border=2)
-
-        # newline character
-        self.cboNLine = wx.Choice(self, -1,
-                                  choices=['LF(0x0A)', 'CR(0x0D)'], size=(70, 20), style=wx.TE_CENTRE)
-        self.cboNLine.SetStringSelection('LF(0x0A)')
-        hbox5.Add(self.cboNLine, flag=wx.LEFT, border=2)
-
-        # local echo
-        self.choLEcho = wx.Choice(self, -1,
-                                  choices=['Yes', 'No'], size=(70, 20), style=wx.TE_CENTRE)
-        self.choLEcho.SetStringSelection('No')
-        hbox5.Add(self.choLEcho, flag=wx.LEFT, border=2)
-
-        vbox.Add(hbox5, proportion=1, flag=wx.CENTRE, border=5)
-        vbox.Add((-1, 5))
-
-        # Control Buttons Layout
+        vbox.Add((-1, 10))
+        
 
         hbox4 = wx.BoxSizer(wx.HORIZONTAL)
-        btn1 = wx.Button(self, label='Save', size=(70, 30))
-        btn1.SetForegroundColour('yellow')
-        btn1.SetBackgroundColour('black')
-        hbox4.Add(btn1, border=10)
+        self.data4 = wx.TextCtrl(self, wx.ID_ANY, "يدوي",
+                            size=(80,50 ), style= wx.TE_CENTRE )
+        self.data4.SetFont(wx.Font(20, 75, 90, 90, faceName=fname))
+        self.data4.SetForegroundColour('red')
+        self.data4.SetBackgroundColour('white')
+        self.data4.SetMaxLength(4)
+        hbox4.Add(self.data4, flag=wx.LEFT, border=8)
 
-        btn2 = wx.Button(self, label='Clear', size=(70, 30))
-        btn2.SetForegroundColour('yellow')
-        btn2.SetBackgroundColour('black')
-        hbox4.Add(btn2, border=10)
 
-        btn4 = wx.Button(self, label='Reset', size=(70, 30))
-        btn4.SetForegroundColour('yellow')
-        btn4.SetBackgroundColour('black')
-        hbox4.Add(btn4, flag=wx.LEFT | wx.BOTTOM)
+        txt4 = wx.StaticText(self, label='تشغيل')
+        txt4.SetForegroundColour('yellow')
+        txt4.SetFont(wx.Font(20, 75, 90, 90, faceName=fname))
+        hbox4.Add(txt4, flag=wx.LEFT, border=8)
 
-        btn3 = wx.Button(self, label='About', size=(70, 30))
-        btn3.SetForegroundColour('yellow')
-        btn3.SetBackgroundColour('black')
-        hbox4.Add(btn3, border=10)
 
-        vbox.Add(hbox4, flag=wx.ALIGN_RIGHT | wx.ALL, border=5)
+        vbox.Add(hbox4, flag=wx.EXPAND|wx.LEFT|wx.RIGHT|wx.TOP, border=5)
+
+        vbox.Add((-1, 10))
+
+        ######################################
+        # Touch Control Buttons
+        ######################################
+        hbox5 = wx.BoxSizer(wx.HORIZONTAL)
+        btn1 = wx.Button(self, label='بدأ', size=(70,40))
+        btn1.SetForegroundColour('black')
+        btn1.SetBackgroundColour('green')
+        btn1.SetFont(wx.Font(16, 75, 90, 90, faceName=fname))
+        hbox5.Add(btn1, flag=wx.LEFT, border=8)
+
+        btn2 = wx.ToggleButton(self, label='الوضع', size=(70,40))
+        btn2.SetForegroundColour('black')
+        btn2.SetBackgroundColour('white')
+        btn2.SetFont(wx.Font(12, 75, 90, 90, faceName=fname))
+        hbox5.Add(btn2,flag=wx.LEFT, border=8)
+        vbox.Add(hbox5, flag=wx.EXPAND|wx.LEFT|wx.RIGHT|wx.TOP, border=5)
+
         vbox.Add((-1, 5))
+        hbox6 = wx.BoxSizer(wx.HORIZONTAL)
+        self.btn4 = wx.Button(self, label='إيقاف', size=((70,40)))
+        self.btn4.SetForegroundColour('black')
+        self.btn4.SetBackgroundColour('red')
+        self.btn4.SetFont(wx.Font(14, 75, 90, 90, faceName=fname))
+        hbox6.Add(self.btn4, flag=wx.LEFT, border=8)
+        btn3 = wx.Button(self, label='Info', size=(70,40))
+        btn3.SetForegroundColour('black')
+        btn3.SetBackgroundColour('white')
+        btn3.SetFont(wx.Font(14, 75, 90, 90, faceName=fname))
+        hbox6.Add(btn3, flag=wx.LEFT, border=8)
+        vbox.Add(hbox6, flag=wx.EXPAND|wx.LEFT|wx.RIGHT|wx.TOP, border=5)
 
+        vbox.Add((-1, 5))
         self.SetSizer(vbox)
 
-        # Config choices events
-        self.Bind(wx.EVT_CHOICE, self.OnPortOpen, self.cboSpeed)
-        self.Bind(wx.EVT_CHOICE, self.OnPortOpen, self.cboCPort)
-        self.Bind(wx.EVT_CHOICE, self.OnTermType, self.cboTMode)
-        self.Bind(wx.EVT_CHOICE, self.OnNewLine, self.cboNLine)
-        self.Bind(wx.EVT_CHOICE, self.OnLocalEcho, self.choLEcho)
 
-        self.txtTerm.Bind(wx.EVT_CHAR, self.OnTermChar)
         self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
-        self.Bind(EVT_UPDATE_COMDATA, self.OnUpdateComData)
+        # CREATED EVENTS HANDLING
+        self.Bind(EVT_UPDATE_COMMSG, self.OnUpdateComMsg)
+        self.Bind(RPI_STOP_BUTTON, self.OnStop)
+        self.Bind(RPI_START_BUTTON, self.OnPortOpen)
+        self.Bind(RPI_MODE_BUTTON, self.OnMood)
 
         # Control  buttons Events objects
-        btn1.Bind(wx.EVT_BUTTON, self.OnFileSave)
-        btn2.Bind(wx.EVT_BUTTON, self.OnTermClear)
+
+        btn1.Bind(wx.EVT_BUTTON, self.OnPortOpen)
+        btn2.Bind(wx.EVT_TOGGLEBUTTON, self.OnMood)
+        self.btn4.Bind(wx.EVT_BUTTON, self.OnStop)
         btn3.Bind(wx.EVT_BUTTON, self.OnAbout)
-        btn4.Bind(wx.EVT_BUTTON, self.OnDataReset)
 
         self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown)
         self.Bind(wx.EVT_CLOSE, self.OnCloseWindow)
@@ -297,27 +379,10 @@ class ConPanel(wx.Panel):
         # event list
         self.lstEvent = None
 
-        # terminal type[ASCI,HEX...]
-        self.termType = self.cboTMode.GetStringSelection()
-
-        # rx only setting
-        self.rxOnly = False
-
-        # newline character
-        if 'CR' in self.cboNLine.GetStringSelection():
-            self.newLine = 0x0D
-        else:
-            self.newLine = 0x0A
-
-        # local echo
-        self.localEcho = False
-
-        # counter for alignment of hex display
-        self.binCounter = 0
-
-    # Clear terminal. Note that the raw data is not affected.
-    def ClearTerminal(self):
-        self.txtTerm.Clear()
+    def IntCallback(self,channel):
+        evt = ManStart()
+        wx.PostEvent(self,evt)
+        #GPIO.cleanup()
 
     # Put your checksum algorithm here
     def ComputeChecksum(self, data):
@@ -329,8 +394,15 @@ class ConPanel(wx.Panel):
 
     # Reset raw data. Terminal will be cleared as well.
     def ResetData(self):
-        self.rawdata.clear()
+        #self.rawdata.append(ord('RST'))
         self.ClearTerminal()
+        self.ang=0
+        wx.PostEvent(self.parent, UpdateAngle(data=self.ang))
+        self.data1.Clear()
+        self.data2.Clear()
+        self.data3.Clear()
+        self.data4.Clear()
+
 
     # Open COM port
     def OpenPort(self, port, speed):
@@ -368,76 +440,49 @@ class ConPanel(wx.Panel):
 
     # Save received data
     def SaveRawData(self, data_file):
+        dout= self.rawdata.hex()
         f = open(data_file, 'wb')
-        pickle.dump(str(self.rawdata), f)
+        pickle.dump(dout, f)
         f.close()
 
-    # Send data via COM port
-    def SendData(self, data):
+    def OnMood(self, evt):
+        #state= evt.GetEventObject().GetValue()
+        if evt.data == True:
+            self.mood="آلي"
+            #Auto firing Mode
+
+        else:
+            self.mood="يدوي"
+
+
+        self.data4.Clear()
+        self.data4.AppendText(self.mood)
+    def OnStop(self, evt):
+        # terminate the thread
+        if self.thread.IsRunning():
+            self.thread.Stop()
+        # join the thread
+        while self.thread.IsRunning():
+            wx.MilliSleep(100)
+
+        # close the port
         if self.ser.is_open:
-            self.ser.write(data)
+            self.ser.close()
 
-    # Set new line character
-    def SetNewLine(self, nl):
-        if nl == 0x0D or nl == 0x0A:
-            self.newLine = nl
+        self.data1.Clear()
+        self.data1.AppendText("--")
+        self.data2.Clear()
+        self.data2.AppendText("--")
+        self.data3.Clear()
+        self.data3.AppendText("--")
+        #GPIO.cleanup()
+        wx.PostEvent(self.parent, UpdateAngle(data=0))
+        #GpioControl(self,5)
 
-    # Enable/disable local echo
-    def SetLocalEcho(self, flag):
-        self.localEcho = flag
-
-    def SetRxOnly(self, flag=True):
-        self.rxOnly = flag
-
-    # Set terminal type
-    def SetTermType(self, termtype):
-        if termtype != '':
-            self.termType = termtype
-
-        if self.termType == 'Hex':
-            self.txtTerm.AppendText('\n')
-            self.binCounter = 0
-
-    # Show/hide controls
-    def ShowControls(self, flag):
-        self.pnlControl.Show(flag)
-        self.Layout()
-
-    # Save file button handler
-    def OnFileSave(self, evt):
-        self.SaveRawData(data_file)
-
-    # Clear terminal button handler
-    def OnTermClear(self, evt):
-        self.ClearTerminal()
-
-    # Reset data button handler
-    def OnDataReset(self, evt):
-        self.ResetData()
-
-    # Terminal type choice contrl handler
-    def OnTermType(self, evt):
-        # terminal type
-        self.SetTermType(self.cboTMode.GetStringSelection())
-
-    # Newline character choice control handler
-    def OnNewLine(self, evt):
-        if 'CR' in self.cboNLine.GetStringSelection():
-            self.SetNewLine(0x0d)
-        else:
-            self.SetNewLine(0x0a)
-
-    # Local echo mode selection handler
-    def OnLocalEcho(self, evt):
-        if 'Yes' in self.choLEcho.GetStringSelection():
-            self.SetLocalEcho(True)
-        else:
-            self.SetLocalEcho(False)
-
-    # Port selection choice handler
+# Port selection choice handler
     def OnPortOpen(self, evt):
-        port = self.cboCPort.GetStringSelection()
-        speed = self.cboSpeed.GetStringSelection()
+        port = '/dev/ttyS0'
+        speed = '115200'
 
         # device is not selected
         if port == '':
@@ -445,168 +490,97 @@ class ConPanel(wx.Panel):
 
         # open the com port
         if self.OpenPort(port, speed):
-            wx.MessageBox(port + ' is (re)open')
+             pass
         else:
             wx.MessageBox('Failed to open: ' + port)
 
-    # Terminal input handler
-    def OnTermChar(self, evt):
-        # no tx data if rxOnly
-        if self.rxOnly:
-            return
-
-        if self.ser.is_open:
-            # key code can be multiple bytes
-            try:
-                self.ser.write([evt.GetKeyCode()])
-            except:
-                pass
-
-        if self.localEcho:
-            if self.termType == 'ASCII':
-                self.txtTerm.AppendText(chr(evt.GetKeyCode()))
-            else:
-                self.txtTerm.AppendText('0x{:02X}.'.format(evt.GetKeyCode()))
-
-    # Local echo mode selection handler
-    def OnSendPacket(self, evt):
-        if self.ser.is_open:
-            self.ser.write(OutPackets[self.choSndPkt.GetStringSelection()])
 
     # COM data input handler
+    def OnUpdateComMsg(self, msg):
+        self.rawdata2 = msg.data if isinstance(
+            msg.data, bytearray) else bytearray(msg.data)
+        dd= ':'.join('{:02x}'.format(x) for x in self.rawdata2)
+        #print(dd)
+        #print(self.rawdata2)
 
-    def OnUpdateComData(self, evt):
+        #decode thread angel and creat event
+        if dd[6] == '6' and dd[7]=='4':
 
-        # for byte in evt.data:
-        #     # append incoming byte to the rawdata
-        #     self.rawdata.append(byte)
-        #     self.rawdata2 = self.rawdata.replace(b'\r', b'')
-        #     self.rawdata2 = self.rawdata.replace(b'\n', b'')
-        #     dd= self.rawdata2.decode('utf-8') 145.96153401553845 225 185
-        
-        
-        #Decode thread angle algorithm
-        self.rawdata = evt.data if isinstance(
-            evt.data, bytearray) else bytearray(evt.data)
-        self.rawdata2 = self.rawdata.strip()
-        
-        dd = self.rawdata2.decode('utf-8')
-
-        if len(dd) == 26:
-            if dd[9] == '4' and dd[10] == '0' and dd[11] == '1':
-                self.ang = '22'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '2':
-                self.ang = '45'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '3':
-                self.ang = '67'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '4':
-                self.ang = '90'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '5':
-                self.ang = '112'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '6':
-                self.ang = '135'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '7':
-                self.ang = '157'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '8':
-                self.ang = '180'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == '9':
-                self.ang = '202'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'A':
-                self.ang = '225'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'B':
-                self.ang = '247'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'C':
-                self.ang = '270'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'D':
-                self.ang = '292'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'E':
-                self.ang = '315'
-            elif dd[9] == '4' and dd[10] == '0' and dd[11] == 'F':
+            if dd[7] == '4' and dd[9] == '0' and dd[10] == '1':
+                    self.ang = '22'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '2':
+                    self.ang = '45'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '3':
+                    self.ang = '67'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '4':
+                    self.ang = '90'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '5':
+                    self.ang = '112'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '6':
+                    self.ang = '135'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '7':
+                    self.ang = '157'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '8':
+                    self.ang = '180'
+            elif dd[7] == '4' and dd[9] == '0' and dd[10] == '9':
+                    self.ang = '202'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '0':
+                    self.ang = '225'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '1':
+                    self.ang = '247'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '2':
+                    self.ang = '270'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '3':
+                    self.ang = '292'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '4':
+                    self.ang = '315'
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '5':
                 self.ang = '337'
-            elif dd[9] == '4' and dd[10] == '1' and dd[11] == '0':
+            elif dd[7] == '4' and dd[9] == '1' and dd[10] == '6':
                 self.ang = '360'
             else:
-                self.ang = "XX"
-
+                self.ang = "0"
             wx.PostEvent(self.parent, UpdateAngle(data=self.ang))
-
-            #print(self.rawdata2)
-            self.data2.Clear()
-            self.data2.AppendText(self.ang)
-            #print('angle ' + self.ang)
-
-            
-            #decode freq and laser thread type 
-            s= dd[21]+dd[20]+dd[19]+dd[18]+dd[17]+dd[16]+dd[15]+dd[14]
+            self.data1.Clear()
+            self.data1.AppendText(self.ang)
+            if int(self.ang) > 0 :
+                GpioControl(self,2) # Auto fire check
+            if dd[12] == '0' and dd[13] == '1':
+                self.data5.Clear()
+                self.data1.AppendText("جوي")
+            else:
+                self.data5.Clear()
+                self.data5.AppendText("أرضي")
+            #decode freq and laser thread type
+            s= dd[24]+dd[25]+dd[21]+dd[22]+dd[18]+dd[19]+dd[15]+dd[16]
             counts = int(s, 16)
             counts_time= counts*(20/(10**9))
-            hz= 1/ counts_time
-            
+            # dispaly count time
+            hz= round((1/counts_time),2)
+            tms= counts*(20/(10**6))
+
             if hz >= 1  and hz <=7 :
                 self.type = 'LRF'
             elif hz > 7  and hz <=25 :
                 self.type = 'LTD'
             elif hz >= 1000  :
-                self.type = 'BR' 
+                self.type = 'BR'
             else:
-                self.type = 'None' 
-              
+                self.type = 'None'
+
             self.freq= str(hz)
+            #self.tt= str(tms)
+            #self.data2.Clear()
+            #self.data2.AppendText(self.tt)
+            self.data2.Clear()
+            self.data2.AppendText(self.freq)
             self.data3.Clear()
-            self.data3.AppendText(self.freq)
-            self.data4.Clear()
-            self.data4.AppendText(self.type)
-            
-            self.rawdata = bytearray()
-            self.rawdata2 = bytearray()            
+            self.data3.AppendText(self.type)
+
+
+            self.rawdata2 = bytearray()
             dd = ''
-#             return self.ang
-            # time.sleep(1)
-            # self.ResetData()
 
-        for byte in evt.data:
-            if self.termType == 'Protocol':
-                # pass byte to the packet decoder
-                ret = self.pd.AddByte(byte)
-                # display packet decode result
-                if ret is None:
-                    pass
-                else:
-                    self.txtTerm.AppendText(ret + '\n')
-
-            elif self.termType == 'Hex':
-                # display formatted hex
-                self.txtTerm.AppendText('0x{:02X}'.format(byte))
-                # counter for alignment of the hex display
-                self.binCounter = self.binCounter + 1
-
-                if self.binCounter == 8:
-                    self.txtTerm.AppendText(' - ')
-
-                elif self.binCounter == 16:
-                    self.txtTerm.AppendText('\n')
-                    self.binCounter = 0
-
-                else:
-                    self.txtTerm.AppendText('.')
-
-            else:
-                if self.newLine == 0x0A:
-                    if byte == 0x0D:
-                        pass
-                    elif byte == 0x0A:
-                        self.txtTerm.AppendText('\n')
-                    else:
-                        self.txtTerm.AppendText(chr(byte))
-                elif self.newLine == 0x0D:
-                    if byte == 0x0A:
-                        pass
-                    elif byte == 0x0D:
-                        self.txtTerm.AppendText('\n')
-                    else:
-                        self.txtTerm.AppendText(chr(byte))
-
-        # self.ResetData()
 
 
  # ===========================================================================
@@ -677,7 +651,7 @@ class ConPanel(wx.Panel):
 
         info = wx.adv.AboutDialogInfo()
         # info.SetBackgroundColour('DIM GREY')
-        info.SetIcon(wx.Icon('logo.png', wx.BITMAP_TYPE_PNG))
+        info.SetIcon(wx.Icon('/home/pi/LWR_RPI_v0.1/logo.png', wx.BITMAP_TYPE_PNG))
         info.SetName('LWR Tracker')
         info.SetVersion('1.0')
         info.SetDescription(description)
@@ -687,6 +661,8 @@ class ConPanel(wx.Panel):
         info.AddDocWriter('Technical Research Center of Egyption Armed Forces')
         info.SetWebSite('https://infinitytech.ltd')
         wx.adv.AboutBox(info)
+channel=17
+#GPIO.add_event_detect(17,GPIO.RISING, callback=ConPanel.IntCallback, bouncetime=300)
 
  # ===========================================================================
  # Adding Panels to the main frame using Splitter
@@ -699,7 +675,7 @@ class LwrFrame(wx.Frame):
         wx.Frame.__init__(self, parent=None, title="LWR Tracker ")
      # serial terminal panel
         self.pnlTerm = ConPanel(self, serial.Serial(
-            '/dev/pts/16'), size=(450, 300))
+            '/dev/pts/16'), size=(100, 480))
         # sizer
         self.sizer = wx.BoxSizer(wx.VERTICAL)
         self.sizer.Add(self.pnlTerm, 1, wx.EXPAND)

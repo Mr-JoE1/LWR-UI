@@ -14,14 +14,14 @@ from termpn import *
 
 class RadarGraph(wx.Panel):
 
-    def __init__(self, parent, title, labels, **kwgs):
-        wx.Panel.__init__(self, parent, size=(450, 350), **kwgs)
-        self.SetBackgroundColour('WHITE')
+    def __init__(self, parent, title, **kwgs):
+        wx.Panel.__init__(self, parent, size=(700, 480), **kwgs)
+        self.SetBackgroundColour('BLACK')
         self.title = title
-        self.labels = labels
-        self.data = [0.0] * len(labels)
-        self.titleFont = wx.Font(12, wx.SWISS, wx.NORMAL, wx.BOLD)
-        self.labelFont = wx.Font(10, wx.SWISS, wx.NORMAL, wx.NORMAL)
+        #self.labels = labels
+        #self.data = [0.0] * len(labels)
+        self.titleFont = wx.Font(3, wx.SWISS, wx.NORMAL, wx.BOLD)
+        #self.labelFont = wx.Font(10, wx.SWISS, wx.NORMAL, wx.NORMAL)
 
         self.InitBuffer()
 
@@ -73,7 +73,7 @@ class RadarGraph(wx.Panel):
         dw, dh = dc.GetSize()
 
         # Find out where to draw the title and do it
-        dc.SetFont(self.titleFont)
+        #dc.SetFont(self.titleFont)
         tw, th = dc.GetTextExtent(self.title)
         #dc.DrawText(self.title, int((dw-tw)/2), spacer)
 
@@ -89,75 +89,53 @@ class RadarGraph(wx.Panel):
 
         # draw the graph axis and "bulls-eye" with rings at scaled 25,
         # 50, 75 and 100 positions
-        dc.SetPen(wx.Pen('blue', 2))
-        dc.SetBrush(wx.TRANSPARENT_BRUSH)
-        #dc.DrawCircle(cx, cy, int(25*scale))
-        dc.DrawCircle(cx, cy, int(50*scale))
-        dc.DrawCircle(cx, cy, int(75*scale))
-        dc.DrawCircle(cx, cy, int(100*scale))
+        dc.DrawBitmap(wx.Bitmap("/home/pi/LWR_RPI_v0.1/radar.png"),int(cx-165*scale) , int(cy-140*scale),True)
+        #dc.DrawBitmap(wx.Bitmap("car.png"),int(cx-52*scale) , int(cy-40*scale),True)
 
-        dc.SetPen(wx.Pen('black', 2))
-        
-        dc.DrawLine(int(cx-110*scale), cy, int(cx+110*scale), cy)
-        dc.DrawLine(cx, int(cy-110*scale), cx, int(cy+110*scale))      
-        dc.DrawBitmap(wx.Bitmap("car.png"),int(cx-38*scale) , int(cy-38*scale),True) 
-        
-        
-        dc.SetPen(wx.Pen('red', 3))
-        xx, yy = self.ThreadAngle(115*scale, ang or 0, cx, cy)
-        dc.DrawLine(cx, cy, int(xx), int(yy))
-        
-        # Now find the coordinates for each data point, draw the
-        # labels, and find the max data point
-        dc.SetFont(self.labelFont)
-        maxval = 0
-        angle = 0
-        polypoints = []
-        for i, label in enumerate(self.labels):
-            val = self.data[i]
-            point = self.PolarToCartesian(val*scale, angle, cx, cy)
-            polypoints.append(point)
-            x, y = self.PolarToCartesian(115*scale, angle, cx, cy)
-            dc.DrawText(label, int(x), int(y))
-            if val > maxval:
-                maxval = val
-            angle = angle + 360/len(self.labels)
+
+        xx, yy = self.ThreadAngle(110*scale, ang or 0, cx-80, cy-28)
+        #print(xx)
+        #print(yy)
+        if xx == 270.0 or xx == 236.0 :
+           dc.SetPen(wx.Pen('green', 3))
+           dc.DrawLine(cx-80, cy-28, int(xx), int(yy))
+        else:
+            dc.SetPen(wx.Pen('red', 3))
+            dc.DrawLine(cx-80, cy-28, int(xx), int(yy))
+
+
 
 
 class MyFrame(wx.Frame):
 
     def __init__(self, parent, title):
         wx.Frame.__init__(self, parent, title=title,
-                          style=wx.DEFAULT_FRAME_STYLE ^ wx.RESIZE_BORDER, size=(450, 700))
-
+                           style= wx.SYSTEM_MENU | wx.CAPTION | wx.CLOSE_BOX, size=(800, 520))
+        self.ShowFullScreen(True)
         # Add window icon
         icons = wx.IconBundle()
         #icons.AddIconFromFile(self._get_img_path('logo.ico'), wx.BITMAP_TYPE_ANY)
-        icons.AddIcon(wx.Icon('logo.ico'))
+        icons.AddIcon(wx.Icon('/home/pi/LWR_RPI_v0.1/logo.ico'))
         self.SetIcons(icons)
 
         # populate two terminal panels
-        self.pnlTerm1 = RadarGraph(self, "",
-                                   ["يميني", "45", "أمامي", "315", "يساري", "225", "خلفي", "135"])
+        self.pnlTerm1 = RadarGraph(self, "")
         self.pnlTerm2 = ConPanel(self, serial.Serial())
 
-        # set RX only mode
-        self.pnlTerm2.SetRxOnly()
-
         # sizer
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
-        self.sizer.Add(self.pnlTerm1, 1, wx.EXPAND)
+        self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.sizer.Add(self.pnlTerm2, 1, wx.EXPAND)
+        self.sizer.Add(self.pnlTerm1, 1, wx.EXPAND)
 
         self.SetSizer(self.sizer)
         self.Show()
 
         self.Bind(EVT_UPDATE_ANGLE, self.pnlTerm1.OnUpdateAngle)
-
+        GPIO.add_event_detect(17, GPIO.RISING, callback=self.pnlTerm2.IntCallback , bouncetime=300)
 
 # --------1---------2---------3---------4---------5---------6---------7---------8
 if __name__ == "__main__":
 
     app = wx.App()
-    frame = MyFrame(None, "LWR Tracker")
+    frame = MyFrame(None, "LWR Monitor")
     app.MainLoop()
