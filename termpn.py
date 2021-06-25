@@ -73,7 +73,7 @@ def GpioControl(self,fn):
     if fn==1:
         #print("alarm")
         GPIO.output(24, GPIO.HIGH)
-        time.sleep(0.04)
+        time.sleep(0.035)
         GPIO.output(24, GPIO.LOW)
     # Manual mode select
     if fn==2:
@@ -155,7 +155,7 @@ class ComThread:
     # main routine: upon arrival of new data, it generates an event.
     def Run(self):
         # global  self.ang
-
+        buffer=b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
         # keep running as far as the flag is set
         while self.keepGoing:
             # read a byte until timeout
@@ -165,28 +165,24 @@ class ComThread:
 
             # valid byte received
             if data == b'\xa4':
-                GpioControl(self,1)
                 ms= self.ser.read(11)
-                msg = UpdateMsg(data=ms)
-                # post the event for decode fun
-                wx.PostEvent(self.win, msg)
-                evt = UpdateComData(data=ms)
-                # post the event for terminal
-                wx.PostEvent(self.win, evt)
-
-                #play alert sound using GPIO.24
-
-                #winsound.Beep(750, 50)
-
+                if ms == buffer:
+                    GpioControl(self,1)
+                else:
+                    GpioControl(self,1)
+                    msg = UpdateMsg(data=ms)
+                    # post the event for decode fun
+                    wx.PostEvent(self.win, msg)
+                    buffer=ms
+                    #print(buffer)
+                    ms=b''
             else:
                 GpioControl(self,3) #Manual Stop
-
                 GpioControl(self,6)
                 # create an event with the byte
-                evt = UpdateComData(data=data)
+                #evt = UpdateComData(data=data)
                 # post the event
-                wx.PostEvent(self.win, evt)
-
+                #wx.PostEvent(self.win, evt)
         # end of loop
         self.running = False
 
@@ -407,15 +403,15 @@ class ConPanel(wx.Panel):
     # Open COM port
     def OpenPort(self, port, speed):
 
-        if self.ser.is_open:
+       # if self.ser.is_open:
             # terminate thread first
-            if self.thread.IsRunning():
-                self.thread.Stop()
+       #     if self.thread.IsRunning():
+       #         self.thread.Stop()
             # join the thread
-            while self.thread.IsRunning():
-                wx.MilliSleep(100)
+       #     while self.thread.IsRunning():
+       #         wx.MilliSleep(100)
             # then close the port
-            self.ser.close()
+       #     self.ser.close()
 
         # set port number and speed
         self.ser.port = port
@@ -481,7 +477,7 @@ class ConPanel(wx.Panel):
 
 # Port selection choice handler
     def OnPortOpen(self, evt):
-        port = '/dev/ttyS0'
+        port = '/dev/ttyUSB0'
         speed = '115200'
 
         # device is not selected
