@@ -8,11 +8,12 @@ LWR  Radar Monitor :
          it plots the laser thread angle  with respect to north direction and extracts
          laser thread frequency and type .
          
-    # windwos 10 version screen--shot:
+         
+   # windwos 10 version screen--shot:
     
    <img src="win_gui.png" alt="lwr gui windows" title="windows version ">
    
-   # raspbery pi version screen--shot:
+   # Raspbery pi version screen--shot:
     
    <img src="rpi_gui.jpeg" alt="lwr gui windows" title="windows version ">
          
