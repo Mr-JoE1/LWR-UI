@@ -7,6 +7,10 @@ LWR  Radar Monitor :
          used for plot data for laser warning systems from data stream 
          it plots the laser thread angle  with respect to north direction and extracts
          laser thread frequency and type .
+         
+         
+         <img src="/repository/win_gui.png" alt="lwr gui windows" title="windows version ">
+         
 licence:                   
 =========
         LWR Monitor, is custom tool developed by
