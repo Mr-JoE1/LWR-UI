@@ -1,19 +1,12 @@
-..[ Infinity Tech Ltd ]--------------------------------------------------------.
-|                                                                              |
-| LWR Monitor Application                                                      |
-| ==========================                                                   |
-|                                                                              |
-| - Is a cross platform application for Laser warning radar systems            |
-| - Developed Infinity Tech ltd , It's a paid tool and not for republishing    |
-|                                                                              |
-............................................[ https://www.infinitytech.ltd].....
 
+                                                                             
+LWR  Radar Monitor :                                                     
+==========================                                                   
 
-description:                   
-=============
-         LWR Monitor, Is a custom tool related toLaser warning system
-         Made by TRC of Egyption Armed Forces which
-         moniter Laser threats over RS458 Communication.
+         LWR Radar monitoe , Is a cross platform Gui application developed in wxPython
+         used for plot data for laser warning systems from data stream 
+         it plots the laser thread angle  with respect to north direction and extracts
+         laser thread frequency and type .
 licence:                   
 =========
         LWR Monitor, is custom tool developed by
