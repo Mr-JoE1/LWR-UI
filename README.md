@@ -9,7 +9,7 @@ LWR  Radar Monitor :
          laser thread frequency and type .
          
          
-         <img src="/repository/win_gui.png" alt="lwr gui windows" title="windows version ">
+   <img src="win_gui.png" alt="lwr gui windows" title="windows version ">
          
 licence:                   
 =========
